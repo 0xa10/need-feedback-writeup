@@ -124,10 +124,12 @@ class KappaBreaker(object):
         k = channel.KappaCrypto("")
 
         ssvec = [_[0] for _ in eqs[:self._lfsrs_N+1,-1].tolist()]
-        new_state = ssvec[:10], ssvec[10:21], ssvec[21:33], ssvec[33:46], ssvec[46:]        
-        
-        for a,b in zip(k.mlfsr.lfsrs, new_state):        
-            a.state = solve_lfsr.bitarray_to_dec(b)
+             
+        # The vector we have describes the state of all LFSRS, seperate into
+        # n-sized vectors and feed to each lfsrs state
+        ssvec.reverse()
+        for lfsr in k.mlfsr.lfsrs:
+            lfsr.state = solve_lfsr.bitarray_to_dec([ssvec.pop() for _ in range(lfsr.n)]) 
         
         return k
 
