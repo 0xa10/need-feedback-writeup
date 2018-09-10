@@ -133,6 +133,18 @@ class KappaBreaker(object):
         
         return k
 
+def get_independant_matrix(theequations):
+    # Select a rank size subset of the equations that has equal rank
+    equations = theequations.copy()
+    rank = get_matrix_rank_gf2(equations)
+    for eq in equations.copy():
+        new_eqs = equations.copy()
+        new_eqs.remove(eq)
+        new_rank = get_matrix_rank_gf2(new_eqs)
+        if new_rank == rank:
+           equations = new_eqs
+    return equations
+    
 def get_matrix_rank_gf2(equations):
     reduced = gaussian_elimination_gf2(equations)
     
