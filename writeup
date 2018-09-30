@@ -1,0 +1,51 @@
+
+  ___            _  ___  
+ / _ \__  ____ _/ |/ _ \ 
+| | | \ \/ / _` | | | | |
+| |_| |>  < (_| | | |_| |
+ \___//_/\_\__,_|_|\___/ 
+                         
+
+1. Intro 
+ 	[Explain about self, motivation, 2-3 lines tops]
+	[Explain about writeup and covered topics: mainly linear cryptanalysis]
+	[The challenge - Google CTF qualifier 2016 - crypto,
+	as of yet no published practical solution (only bruteforce)]
+	[Challenge - encrypted communications in pcap, client/server code
+	featuring proprietary crypto - LFSRs and Sbox
+	[General premise of the attack, with links to technical gists - 
+		breaking Sbox, breaking LFSR, etc ]
+2. KappaCrypto
+	[General code structure and class heirarachy
+	 	KappaTunnel relaying KappaChannel, KappaMsg -> KappaPacket,
+		General KappaCrypto class interface]
+	[Seed generation - 2 lines at most.]
+	[Cipher design - 
+		LFSR(s), Multi-LFSR, Sbox, Stream XOR, make cool graph]
+3. LFSRs - 
+	[Brief explanation, usage examples, historical vulnerabilities - DVD crypto (CSS)]
+	[Attacking LFSRs - 
+		analyzing period, etc, recovering seed from outputs.]
+	[Show intuition for recovering seed for n-sized lfsr using n outputs of said LFSR]
+	[Linear equation systems and gaussian reduction]
+	[LFSR representation using linear algebra]
+	[Example - creating linear equation system and solving LFSR using GE]
+4. Multi-LFSRs
+	[Brief analysis of Multi-LFSRs, xor as addition mod 2]
+	[Example - creating LES for Multi LFSR and solving using GE]
+5. Sbox
+	[Brief explanation, only non-linear component]
+	[Explain about 6->4 bit mapping and resulting conclusions]
+	[Intuition - finding linearity in Sbox - fixed bits]
+	[Linear cryptanalysis - the idea - finding additional linear relations between inputs and output]
+	[Creating equations from linear relations]
+6. Putting it together - 
+	[Each Sbox output provides us with a series of equations we know hold over the cipher system]
+	[Generally speaking - for a system with LFSRs with total N bits, N linearly-independant
+	 equations are required]
+	[Guessing keystream bytes - HTTP response headers, upper nibbles of ASCII, etc]
+	[Given speculative keystream, we can attempt to solve linear equation system using GE]
+	[Example and code demo - (sage?)]
+7. The solution - full code in Python3 and the flag
+
+	

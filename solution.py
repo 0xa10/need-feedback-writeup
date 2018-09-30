@@ -6,7 +6,7 @@ import solve_lfsr
 import sys
 from collections import defaultdict
 import math
-CHALLENGE_PATH = "."
+CHALLENGE_PATH = ".."
 sys.path.append(CHALLENGE_PATH)
 import channel
 import glob
