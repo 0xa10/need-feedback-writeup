@@ -26,7 +26,7 @@
             [Brief explanation, usage examples, historical vulnerabilities - DVD crypto (CSS)]
             [Attacking LFSRs - 
                 analyzing period, etc, recovering seed from outputs.]
-            [Show intuition for recovering seed for n-sized lfsr using n outputs of said LFSR]
+            [Show intuition for recovering seed for n-sized lfsr using n outputs of said LFSR] - seperate to different page
             [Linear equation systems and gaussian reduction]
             [LFSR representation using linear algebra]
             [Example - creating linear equation system and solving LFSR using GE]
@@ -50,11 +50,10 @@
 
 --[ 1 - Intro
     This writeup will describe how to solve the need-feedback challenge from the 2016 Google CTF "Homework" exercises.
-    In a nutshell, in this challenge you are presented with code for a proprietary implementation of an encrypted tunnel, called KappaCrypto.
+    In this challenge you are presented with code for a proprietary implementation of an encrypted tunnel, called KappaCrypto.
     A pcap file containing an encrypted HTTP session is also provided, with the flag presumably contained within the encrypted payload.
     
-    At the time this challenge was published I was busy polishing my crypto skills, and though I found this challenge very interesting I did not have
-    the knowhow to solve it. Two years later - I decided to finally put to work some of my newly acquired knowledge in order to implement a solution for this challenge.
+    Back in 2016 when this challenge was posted I did not have the knowhow to tackle this challenge and I decided to make a point out of learning the necessary skills and solving it.
     Big thanks goes out to Bar Katz for introducing me to the mathematical theory and intuition required to tackle this task.
 
     This challenge remained unsolved during the CTF, and a solution for it was first published by luc-lynx:
@@ -70,46 +69,30 @@
         - Sbox analysis
         - Linear equation systems
         - Gaussian elimination
+        - Cold fusion
         - etc
 
-    For those already familiar with some of these concepts who are merely interested in the gist of the solution:
-    By finding linear equations that hold over the Sbox, and using known plaintext bytes (HTTP headers) to extract parts of the keystream,
-    it is possible to generate enough independent linear equations to solve for each of the initial key state bits.
-    For this, we have to accomplish the following sub-tasks:
-        1. Recover the original state of an LFSR, given sufficient outputs
-        2. Represent the LFSR and the MultiLFSR elements using linear equations.
-        3. Analyze the Sbox to find linear equations which hold (are always true) over the Sbox
-        4. Collect enough keystream bits based on the HTTP headers, and create an enveloping linear equation system for the whole cipher
+    The general idea is that the cipher design allows an attacker to find linear equations that 
+    hold over the cipher, instantly solving all 60 bits of the initial state using just a few 
+    bytes worth of keystream - which can be derived based on the underlying HTTP communications.
 
 --[ 2 - KappaCrypto
     The cipher system presented in the challenge is named KappaCrypto.
-    It provides several primitives which eventually come together to create an encrypted tunnel -
+    It comprises several components and primitives to implement a secure tunnel -
     A KappaTunnelHandler class implements an interface for a basic python ThreadedTCPServer.
     Inside the tunnel, a KappaChannel object is instantiated, which processes messages in the
     upstream and downstream channels, wrapping them in KappaMsg objects, and then serializing them
     into KappaPacket objects which are finally sent through the tunnel.
 
     The encryption takes place prior to wrapping in KappaMsg objects, by using the KappaCrypto
-    class, which is where the magic happens:
-    Looking at the class, we see several key elements:
+    class, which has 3 major components:
         1. 5 sets of LFSR coefficients, representing LFSRs of various bit lengths
         2. An Sbox, represented as a python list - in which sbox_tb[sbox_input] = sbox_output 
         3. a MultiLFSR class, which brings together the five aformentioned LFSRs with the Sbox
     
-    Firstly - what is an LFSR?
     https://en.wikipedia.org/wiki/Linear-feedback_shift_register
     We'll go into the nitty gritty of LFSRs in the next section,
-    for now suffice it to say that a linear feedback shift register is a simple pseudorandom number generator, which emits a single bit each cycle.
-    In KappaCrypto, the LFSR implementation (truncated) looks like this:
-        class LFSR:
-          def __init__(self, coeffs, n, state=1):
-            ...
-          def next(self):
-            b = self.state >> (self.n - 1)
-            ...
-            return b
-    Generally speaking, a coefficient vector describes a specific LFSR, n describes its length,
-    and the state parameter is effectively the seed.
+    LFSR stands for linear feedback shift register, and is a simple pseudorandom number generator, which emits a single bit each cycle.
     
     As for the Sbox - a Substition-box is simply a table which takes in values in a given range and 
     outputs values in a given range.
@@ -178,17 +161,27 @@
     The 5 LFSRs bit length totals to 60 bits (0xa + 0xb + 0xc + 0xd + 0xe), which means
     we have to recover 60 bits - not feasible for bruteforce.
     
---[ 3. Linear feedback shift registers
+--[ 3. Linear feedback shift registers, linear equation systems
     LFSRs are simple PRNG constructs, which are commonly used in hardware applications due to their speed and simplicity.
     Historically, LFSRs have been used (to varying degrees of success) in many ciphers, such as in GSM, Bluetooth, and various digital broadcast mediums.
     Famously, the Content Scramble System, which was used to encrypt DVDs and was implemented using LFSRs, was completely broken partially on account of its 
     use of LFSRs.
 
     Many types of LFSRs exist, the one we're interested, which most closely resembles the LFSR in KappaCrypto is called a Galois LFSR.
-    Generally speaking, a Galois LFSR is simple an n-bit register, which is shifted left at each round. 
+    In KappaCrypto, the LFSR implementation is of a Galois LFSR, it looks like this:
+        class LFSR:
+          def __init__(self, coeffs, n, state=1):
+            (truncated)
+          def next(self):
+            b = self.state >> (self.n - 1)
+            (truncated) 
+            return b
+    The LFSR is initialized with a coefficient, of n bit-length,
+    and the state parameter is effectively the seed.
     The outgoing bit (the MSB) is the output for that round, and the incoming zero bit is inserted as the new LSB.
-    The LFSR also has a coefficient vector, which is simply a series of taps, or indexes to specific bits in the register which are XORed
-    with the output bit at each round. 
+    
+    The coefficient vector marks "taps" on the LFSR, which are XORed with the output bit in 
+    each cycle.
     
     Example - simple 4 bit LFSR:
     lsb ... msb
@@ -198,7 +191,6 @@
         0 1 1 1 
               ^ 
         First output bit 
-
     State after 1 shift, before XOR:
         0 0 1 1, output bit is 1
     XORing with the taps:
@@ -210,129 +202,197 @@
         0 1 0 1
     [animate a few more rounds]
 
-    A different way to look at this is - only if the output bit from the LFSRs current round is 1, XOR the state with the coefficient vector. 
-    
-    Notes regarding KappaCrypto - in KappaCrypto, the coefficient vector is 1 bit longer than the register, with the MSB by definition set to 1.
-    This effectively "short-circuits" all outgoing bit - any 1 bit shifted beyond the register size will be zeroed by XORing with the MSB, that way 
-    the register is truncated to n-bits at any time the outgoing bit is 1. To account for this, the register has a leading 0
-    The coefficient vector is converted to a number and is treated as a polynomial value in KappaCrypto's LFSR implementation - the polynomial is 
-    just a number representing the taps as a bit vector, which is then XORed with the state (also a number representing a bit value).
-    For the previous example, the coefficients vector is [1,2,4] (or - 22) and the initial state is 14.
-    0 1 1 0 1
-    0 1 1 1 0
-    First round, before XOR:
-    0 1 1 0 1
-    0 0 1 1 1
-    After XOR:
-    0 1 0 1 0
-    
-    The state of each LFSR at any given point is linearly dependant on its previous states. This means that given enough outputs of a
+    The state of any LFSR at any given point is linearly dependant on its previous states. This means that given enough outputs of a
     given LFSR, we will be able to recover the LFSRs state prior to those outputs.
     More concretely - given an LFSR n bits in length, we need n outputs to fully recover its state.
-    Before getting into the mathemathical representation of LFSRs and how to solve them, let's observe the intuition for the previous statement:
-    Given a 4 bit LFSR and coefficient vector, where a0 is the lsb and a3 is the msb. For convenience, we'll use the fixed 
-    coefficient vector from the previous example, though this can easily be generalized for any coefficient vector c0..c3
-        0  1  1  0  - coefficient vector
-        a0 a1 a2 a3 - state vector (seed)
-    The first output of this LFSR would simply be a3. 
-    The state vector is then shifted:
-        0   a0          a1          a2
-    Now lets XOR the taps with the output (a3), to reach the next state:
-        0   a0^a3       a1^a3       a2
-    Shifted again, the second output from this LFSR would be a2, and state, pre-xor, would be:
-        0   0           a0^a3       a1^a3
-    Then, XORing the output bits with the taps:
-        0   0^a2        a0^a3^a2    a1^a3
-    One more time, lets shift and take the MSB as the output - so a1^a3 is our third output, and the state (pre-xor) is:
-        0   0           0^a2        a0^a3^a2
-    And post XOR:
-        0   0^a1^a3     0^a2^a1^a3  a0^a3^a2
-    Finally, out fourth output is a0^a3^a2
-    So, we have 4 outputs from the LFSR: 
-        a3
-        a2
-        a1^a3
-        a0^a2^a3
-    If the direction we're headed is clear to you at this point, feel free to skip to Linear equation systems and GE up ahead.
-    Now, if we have 4 consecutive outputs from an LFSR with an unknown seed and the same coefficient vector, we know 
-    that the first output corresponds to the 4th bit of the state (a3), the second output corresponds to the 3rd bit (a2),
-    and the third and fourth outputs correspond respectively to the second bit of the state XORed with the fourth, and 
-    the first, third and fourth bits XORed together - or more clearly, with s0..s3 describing outputs from the LFSR:
-    Lets say S = s0...s3 = [1,0,1,1]
-        a3          = s0 = 1
-        a2          = s1 = 0
-        a1^a3       = s2 = 1
-        a0^a2^a3    = s3 = 1
-    Off the bat, we know the values of a2 and a3, and we can assign them to the other two equations to discover their values:
-        a3 = 1
-        a2 = 0
-        a1^a3 = a1^1 = 1 -> a1 = 0
-        a0^a2^a3 = a0^0^1 = 1 -> a0 = 0
-    So, for the output vector S, the initial state vector a0...a3 is 
-        0 0 0 1
-    Lets confirm this by running 4 rounds of the LFSR with this seed (also, switching to the leading bit convention used in KappaCrypto
-        0 1 1 0 1 - coefficient vector
-        0 0 0 1 0 - seed
-              ^
-              output bit
-    After first shift:
-        0 0 0 0 1 - output bit was 1, xor with polynomial
-        0 1 1 0 1
-        ---------
-        0 1 1 0 0, shift again:
-        0 0 1 1 0 - output bit was 0, dont xor with polynomial, just shift:
-        ---------
-        0 0 0 1 1 - output bit was 1, xor with polynomial:
-        0 1 1 0 1
-        ---------
-        0 1 1 1 0, shift again:
-        0 0 1 1 1 - output bit was 1, and that's four outputs: S = [1 0 1 1]
     
-    Many of you may have notices that all of these calculations can be modeled as a simple system of linear equations, modulo 2 (XOR is addition modulo 2)
-    a3 = 1 mod 2
-    a2 = 0 mod 2
-    a1 + a3 = 1 mod 2
-    a0 + a2 + a3 = 1 mod 2
+    For more information how this is accomplished you can see the appendix about LSFRs and
+    linear equation systems.
+    I ported over some of the concepts seen here:
+    https://www.iasj.net/iasj?func=fulltext&aId=88499
+    to apply to the LFSR as its implemented in this challenge.
+    The following function takes a coefficient vector and returns a set of equations
+    for count consecutive outputs. You could multiply this matrix with the initial state
+    to get a vector containing 'count' output bits starting from that state.
+        def get_lfsr_equations(coeff, count):
+            m = np.hstack((np.zeros((n, 1)), np.eye(n)[:,:n-1]))
+            coeff_m = np.vstack((np.zeros((n-1, n)), coeff))
+            tmp = np.eye(n)
+            C = []
+            for i in range(count):
+                C.append(tmp[:,n-2])
+                tmp = (tmp@m + tmp@m@coeff_m) % 2
+            return np.matrix(C).transpose()[:n-1,:]
+    To clarify - each "equation" in this matrix represents a linear combination of some of 
+    the registers bits. Its an expansion of the LFSRs coefficient vector over several 
+    iterations of the LFSR.
     
-Linear equation system: 
-    An alternative view to represent this in linear algebra is with matrices. Consider the following linear equation system:
-    0*a0 + 0*a1 + 0*a2 + 1*a3 = 1 mod 2
-    0*a0 + 0*a1 + 1*a2 + 0*a3 = 0 mod 2
-    0*a0 + 1*a1 + 0*a2 + 1*a3 = 1 mod 2
-    1*a0 + 0*a1 + 1*a2 + 1*a3 = 1 mod 2
+    [Example of output]
     
-    If we consider the coefficients to each of the state bits as vectors, those vectors composing a matrix A,
-    and the result vector S as a column vector b, we can derive the following matrix equation:
-    A*x = b, where
-    A = 0 0 0 1   b = 1
-        0 0 1 0       0
-        0 1 0 1       1
-        1 0 1 1       1
-    If we simplify this equation with the same intuition as we did before, 
-    we can XOR the 3rd row with the 1st row, and the 4th row with the 3rd and 2nd row, also making sure to XOR the b column:
-    A = 0 0 0 1   b = 1
-        0 0 1 0       0
-        0 1 0 0       0
-        1 0 0 0       0
-    For notation, I'll now reverse this LES (row-wise)
-    A = 1 0 0 0   b = 0
-        0 1 0 0       0
-        0 0 1 0       0
-        0 0 0 1       1
-    This is called the row-echelon form of the matrix - the identity matrix and the result column.
-    Each column in the identity matrix corresponds to a bit - a0..a3, with the final column revealing the value of said bit.
-    What we did by simplifying the equation system is analogous to multiplying [A b] by A's inverse (A^-1), resulting in the identity matrix and the result column vector.
+     
+--[ 4. Multi-LFSRs - LES cont.
+    As seen earlier, KappaCrypto has a class named MultiLFSR which combines the output of
+    all the LFSRs it contains (a Geffe generator?) and then puts them through an Sbox.
+    
+    In KappaCrypto, the LFSR outputs are XORed together to combine them - which is essentially
+    addition modulo 2. As such, we can just add together our equations by stacking them
+    horizontally, and add the results vectors for those equations to end up with a valid
+    equation set.
+    
+    For instance, lets assume we have the following LFSRs in our MultiLFSR:
+    A = a0 a1 a2 a3 - state vector          B = b0 b1 b2 b3 b4 b5
+    C = 0  1  1  0                          C = 1  0  1  1  0  1
+    
+    Using the code from before, we'll generate equations for each of these. Taking the 3rd
+    equations as an example:    
+    equations_A[3]: 1 1 0 0 - > 
+        a0 + a1 = output_A[3]
+    equations_B[3]: 0 0 1 0 1 0 -> 
+        b2 + b4 = output_B[3]
+    It stands to reason that since we add up the outputs, adding up the equations also holds:
+        equations_A[3] + equations_B[3] = a0 + a1 + b2 + b4 = output_A[3] + output_B[3]
+    
+    Conceptually, we're just introducing more variables to our system, so we'll need more
+    outputs from the MultiLFSR to solve.
+    Given a MultiLFSR with several LFSRs of arbitrary lengths, we need N outputs to solve 
+    for the origianl seed, N being the total bit length of all the contained LFSRs.
+    
+    So, if we stack our equations to represent addition of all LFSR outputs, we can come up
+    with a linear equation system
+    [example of solving the example MultiLFSR given 10 outputs]
 
-    One way of reducing an LES to its row-echelon form is called Gaussian Elimination:
-    [animate gaussian elimination on previous equation system]
+    Before diving into the Sbox, I'd like to show how all of this would apply to KappaCrypto
+    had it NOT passed the outputs from the MultiLFSR through the Sbox.
+    Lets use the coefficient values from Kappa and generate enough outputs to solve
+    for the original seeds, this time using gaussian elimination.
+    [Example of solving the Kappa MultiLFSR given 60 outputs]
+     
+--[ 5. Substition boxes - linear cryptanalysis
+    Sboxes take in some set of input bits (of a fixed length) and substitute them with a set
+    of output bits (also of a fixed, but not necessarily same length).
+    
+    In KappaCrypto, the Sbox is implemented as a list with 64 (2^6) elements, which contain 
+    values between 0-15 (2^4) - so it maps between 6 bit values and 4 bit values.
+    If you observe the list, each value repeats 4 times - to account for the 2 bit disparity.
+    Simply speaking, it means that given a certain output, there are 4 different inputs
+    that could have led to that output.
+    
+    Since the mapping is arbitrary and lossy, there isn't necessarily a linear relation between 
+    said input bits and output bits. 
+    In fact, the purpose of the Sbox in a cipher such as KappaCrypto is to reduce linearity, 
+    preventing us from employing linear equation systems to solve our LFSR.
 
-    So, we saw that given an LFSR, n bits in length, and its coefficient vector, we can generate an equation system comprising n equations, 
-    which can be solved given n outputs from said LFSR.
-    So, how do we generate the equation system? The intuition demonstrated above can be used to heuristically generate the equation system,
-    but for convenience and clarity ahead I'll also show how to employ standard linear algebra to create this system using numpy/MATLAB/sage:
-    [Sage/MATLAB code]
+    Before passing through the Sbox, every 6 bits of output from the MultiLFSR (each bit being
+    a linear combination of all the contained LFSRs output) would provide us with 6 equations
+    representing the linear relation between the original state and the output.
+    However, the same 6 bits are now used to lookup an alternative, 4 bit value.
+    Since each one of those 4 bit values could have originated from 4 different inputs, we 
+    cannot tell what the LFSRs output was based on the keystream - at least not naively.
+    
+    In order to attack this component of the cipher we need to find linear equations that 
+    hold over the Sbox, i.e. "survive" being passed through the Sbox.
+    To accomplish this, we need to take a closer look at the Sbox's inputs and outputs, on 
+    the bit level. 
+    More concretely, given a 4 bit output from the Sbox, we want to look at all four possible 6 
+    bit inputs, and try to find any linear equation that holds over all of these inputs.
+    
+    We'll start off with an intuitive example, working on the Sbox from KappaCrypto:
+        sbox_tb = [ 7, 6, 5, 10, 8, 1, 12, 13, 6, 11, 15, 11, 1, 6, 2, 7, 0, 2,
+                    8, 12, 3, 2, 15, 0, 1, 15, 9, 7, 13, 6, 7, 5, 9, 11, 3, 3,
+                    12, 12, 5, 10, 14, 14, 1, 4, 13, 3, 5, 10, 4, 9, 11, 15, 10,
+                    14, 8, 13, 14, 2, 4, 0, 0, 4, 9, 8,]
+    First, we want to reverse the Sbox to see which outputs are caused by which inputs:
+        rev_sbox_tb = defaultdict(list)
+        for idx, value in enumerate(sbox_tb):
+            rev_sbox_tb[value].append(idx)
+        rev_sbox_tb
+        defaultdict(list,
+            {7: [0, 15, 27, 30],
+             6: [1, 8, 13, 29],
+             ... (truncated)
+             14: [40, 41, 53, 56],
+             4: [43, 48, 58, 61]})
+    Taking 7 as an example - this value substitutes 0, 15, 27 and 30, lets look at their
+    binary representation:
+        print("\n".join(bin(i)[2:].zfill(6) for i in rev_sbox_tb[7]))
+        000000
+        001111
+        011011
+        011110
+        
+    Looking at each of the bits in each of the inputs, we see the following things:
+        - In bits 2, 4, 5, 6 of each of the values, theres an even occurence of 0 and 1 bits.
+        - In bit 3, 0 only occurs once, and 1 occurs 3 times.
+        - In bit 1 - only 0 bits occur.
+    This shows a significant bias in the Sbox. For now, we're only going to address bit 1 of 
+    each of the inputs, since it happens to be 0 for 100% of the Sbox inputs for that value.
+
+    Now, given this new information, lets say we see the Sbox output a value of 7. 
+    We know that the inputs that lead to this value were either 0, 15, 27, or 30. 
+    But we know for certain that the first (most significant) bit of whatever the input was - 
+    is 0.
+    We also know that bit 3 was more likely to be 1 than 0, but we'll ignore this for now
+    since it complicates our solution.
+
+    Another example, this time for Sbox output value 14 - 
+        print("\n".join(bin(i)[2:].zfill(6) for i in rev_sbox_tb[14]))
+        101000
+        101001
+        110101
+        111000
+    Here, bits 1 and 5 are the same in each of the inputs, and 75% bias exists in bits 3 and 4.
+    
+    If we do this for all Sbox outputs we'll find that almost each Sbox output leaks information
+    about input bits, with 100% certainty.
+    This alone could be enough to generate enough linear equations, but we can extract even
+    more linear information using a more generalized approach.
+        
+    This approach is akin to linear cryptanalysis as its described here, except we omit use
+    of the statistical components and use only 100% biases in certain bits.
+    [find paper]
+    
+    Essentially, we again take all 4 inputs for a given Sbox output, and check which
+    linear combination of bits leads to uniform results among all 4 inputs.
+    For instance, again looking at the example for Sbox output 14:
+        print("\n".join(bin(i)[2:].zfill(6) for i in rev_sbox_tb[14]))
+        101000
+        101001
+        110101
+        111000
+    Lets combine (add mod 2 i.e. xor) bits 1, 3 and 4 in each of these outputs:
+        101000 - 1 + 1 + 0 = 2 mod 2 = 0
+        101001 - 1 + 1 + 0 = 2 mod 2 = 0
+        110101 - 1 + 0 + 1 = 2 mod 2 = 0
+        111000 - 1 + 1 + 0 = 2 mod 2 = 0
+        ^ ^^     
+        101100 - (the mask)
+    This allows us to collect additional information from each Sbox output - 
+    if the Sbox outputs 14, no matter which of the four possible inputs 
+    was responsible for it - we know that the sum (mod 2) of bits 1, 3 and 4 was 0 - 100%
+    of the times.
+    And of course, each one of those bits (i.e. combined LFSR outputs) can be represented as 
+    a linear equation of the initial LFSR states.
+    The sum of these equations can be represented by adding the equations mod 2 - i.e. XORing 
+    them.
+    More concretely - if we apply the mask 101100 to all 4 inputs, and then sum the bits
+    of each of those inputs, the result will be 0 100% of the time.
+    
+    To map all such biases in the Sbox, we'll do the following:
+        for each Sbox output, map the four relevant 6 bit inputs:
+            for each possible 6 bit mask (2^6 values), 
+            apply the mask to all four input values, and sum their bits.
+            If the results are the same for all four input values, we have found
+            a valid equation which holds over the Sbox.
+
     
     
+
+    
+
+    
+    
+    
+     
     
 
 https://www.springer.com/gp/book/9783642173417
@@ -347,3 +407,4 @@ TODO -
     LFSR and GE animation scripts
     Links in writeup
     Set up references section
+    Replace get_lfsr_equations with either MATLAB or sage code.
