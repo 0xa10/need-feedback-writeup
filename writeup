@@ -243,7 +243,7 @@
     A = a0 a1 a2 a3 - state vector          B = b0 b1 b2 b3 b4 b5
     C = 0  1  1  0                          C = 1  0  1  1  0  1
     
-    Using the code from before, we'll generate equations for each of these. Taking the 3rd
+    Using the code from before, we'll generate equations for each register. Taking the 3rd
     equations as an example:    
     equations_A[3]: 1 1 0 0 - > 
         a0 + a1 = output_A[3]
@@ -272,27 +272,23 @@
     of output bits (also of a fixed, but not necessarily same length).
     
     In KappaCrypto, the Sbox is implemented as a list with 64 (2^6) elements, which contain 
-    values between 0-15 (2^4) - so it maps between 6 bit values and 4 bit values.
-    If you observe the list, each value repeats 4 times - to account for the 2 bit disparity.
-    Simply speaking, it means that given a certain output, there are 4 different inputs
-    that could have led to that output.
-    
-    Since the mapping is arbitrary and lossy, there isn't necessarily a linear relation between 
-    said input bits and output bits. 
-    In fact, the purpose of the Sbox in a cipher such as KappaCrypto is to reduce linearity, 
+    values between 0-15 (2^4) - meaning it maps 6 bit values to 4 bit outputs.
+    As such, each output value in the list repeats 4 times to account for the 2 bit loss - 
+    each output value could have originated from 4 different input values.
+    The purpose of the Sbox in a cipher such as KappaCrypto is to reduce linearity, 
     preventing us from employing linear equation systems to solve our LFSR.
 
-    Before passing through the Sbox, every 6 bits of output from the MultiLFSR (each bit being
-    a linear combination of all the contained LFSRs output) would provide us with 6 equations
-    representing the linear relation between the original state and the output.
-    However, the same 6 bits are now used to lookup an alternative, 4 bit value.
-    Since each one of those 4 bit values could have originated from 4 different inputs, we 
-    cannot tell what the LFSRs output was based on the keystream - at least not naively.
+    In KappaCrypto, 6 rounds (a round being the sum of each LFSR output) of the MultiLFSR 
+    are concatenated and used as 6 bit inputs to the Sbox.
+    Prior to the outputs passing through the Sbox, we could create linear equations for each
+    of the Sbox outputs.
+    The Sbox prevents us from doing this, since it cannot be represented with linear equations.
     
     In order to attack this component of the cipher we need to find linear equations that 
     hold over the Sbox, i.e. "survive" being passed through the Sbox.
     To accomplish this, we need to take a closer look at the Sbox's inputs and outputs, on 
     the bit level. 
+
     More concretely, given a 4 bit output from the Sbox, we want to look at all four possible 6 
     bit inputs, and try to find any linear equation that holds over all of these inputs.
     
@@ -312,7 +308,7 @@
              ... (truncated)
              14: [40, 41, 53, 56],
              4: [43, 48, 58, 61]})
-    Taking 7 as an example - this value substitutes 0, 15, 27 and 30, lets look at their
+    Taking 7 as an example - this value substitutes 0, 15, 27 and 30. Lets look at their
     binary representation:
         print("\n".join(bin(i)[2:].zfill(6) for i in rev_sbox_tb[7]))
         000000
@@ -320,14 +316,14 @@
         011011
         011110
         
-    Looking at each of the bits in each of the inputs, we see the following things:
-        - In bits 2, 4, 5, 6 of each of the values, theres an even occurence of 0 and 1 bits.
-        - In bit 3, 0 only occurs once, and 1 occurs 3 times.
-        - In bit 1 - only 0 bits occur.
+    Looking at each of the bits in each of the inputs, we see the following:
+        - In bits 2, 4, 5, 6 of each of the values, theres an even occurence of '0' and '1' bits.
+        - In bit 3, '0' only occurs once, and '1' occurs 3 times.
+        - In bit 1 - *only* '0' bits occur.
     This shows a significant bias in the Sbox. For now, we're only going to address bit 1 of 
     each of the inputs, since it happens to be 0 for 100% of the Sbox inputs for that value.
 
-    Now, given this new information, lets say we see the Sbox output a value of 7. 
+    Given this new information, lets say we observe the Sbox output the value 7. 
     We know that the inputs that lead to this value were either 0, 15, 27, or 30. 
     But we know for certain that the first (most significant) bit of whatever the input was - 
     is 0.
@@ -342,61 +338,134 @@
         111000
     Here, bits 1 and 5 are the same in each of the inputs, and 75% bias exists in bits 3 and 4.
     
-    If we do this for all Sbox outputs we'll find that almost each Sbox output leaks information
-    about input bits, with 100% certainty.
-    This alone could be enough to generate enough linear equations, but we can extract even
-    more linear information using a more generalized approach.
+    Let's take a more general approach to this, by employing techniques akin to linear
+    cryptanalysis.
+    For each of the Sbox outputs, we take the four 6 bits values that could have led to it  
+    (e.g. 40, 41, 53 and 56 all lead to the output value 14).
+    We then iterate over all possible combinations of those 6 input bits, and sum their values 
+    (hamming weight) mod 2 - for each of the four input values. 
+    More concretely, we iterate over all possible 6 bit masks, applying them to the four 
+    input values, and then summing their bits.
+    If all four sums acquired are the same - we have found a linear equation that holds over 
+    the Sbox.
+    
+    For instance, consider the mask value 101100, which means we sum bits 1, 3 and 4 (from MSB 
+    to LSB) of each of the input values 40, 41, 53 and 56, which all lead to output value 14.
+    Mask - 101100
+        101000 & 101100 = 101000  - hamming weight = 2 = 0 mod 2
+        101001 & 101100 = 101000  - hamming weight = 2 = 0 mod 2
+        110101 & 101100 = 100100  - hamming weight = 2 = 0 mod 2
+        111000 & 101100 = 101000  - hamming weight = 2 = 0 mod 2
+
+    This mask (or boolean function) therefore represents a linear equation which holds over
+    the Sbox with 100% certainty - given the output value 14, we know for certain that 
+    whatever the input was - bits 1, 3 and 4 of it, summed together modulo 2 - were equal to 0.
+    An additional example for a mask that holds over this Sbox for output value 14 is 001110
+        101000 & 001110 = 001000  - hamming weight = 1 = 1 mod 2
+        101001 & 001110 = 001000  - hamming weight = 1 = 1 mod 2
+        110101 & 001110 = 000100  - hamming weight = 1 = 1 mod 2
+        111000 & 001110 = 001000  - hamming weight = 1 = 1 mod 2
+
+    
+    To recap - for each given Sbox output value, and the four corresponding inputs,
+    we go over all possible boolean functions which apply a 6 bit mask and then sum all the 
+    bits modulo 2, and only save the ones that lead to the same result over the four
+    input values.
+    
+    Eventually, approximately 128 such boolean functions exist for the KappaCrypto Sbox, 
+    meaning that for each 4 bit output, we extract on average 8 equations that go toward
+    solving our LFSR system!
+    (This isn't acccurate since some of these equations will be linearly dependant on each 
+    other.)
+    
+    
+--[ 6. Putting it all together
+    Recall that each bit of the Sbox output represents the combination (or addition) of
+    the output bit from all contained LFSRs in a given round.
+    So, another way to look at the Sbox equations that we procured is that each one
+    represents the sum of multiple LFSR rounds.
+
+    For example, lets say we have 5 LFSRs, l1 to l5, and their corresponding output vectors,
+    Sl1 to Sl5.
+    The first bit emitted from the MultiLFSR system will be Sl1(1) + Sl2(1) + ... + Sl5(1) = Sm1,
+    the second bit will be Sm2 = Sl1(2) + ... + Sl5(2) and so on.
+    Thus, the first value to go through the Sbox will be (concatenated)
+        Sm1 Sm2 Sm3 Sm4 Sm5 Sm6
+    
+    If we were to know, for instance, that the first output value from the Sbox was 14, 
+    then we know that Sm1 ... Sm6 is one of the following: 40, 41, 53, 56.
+    We also know, with 100% certainty, that the boolean function 001110 -> 1 applies here,
+    and that means that we know the sum (mod 2) of a certain combination of the input bits:
+        Sm1 Sm2 Sm3 Sm4 Sm5 Sm6
+        0   0   1   1   1   0   -> 1
+        Sm3 + Sm4 + Sm5 = 1 mod 2
+        Sm3 = Sl1(3) + Sl2(3) + Sl3(3) + Sl4(3) + Sl5(3) 
+        Sm4 = Sl1(4) + Sl2(4) + Sl3(4) + Sl4(4) + Sl5(4) 
+        Sm5 = Sl1(5) + Sl2(5) + Sl3(5) + Sl4(5) + Sl5(5) 
+    If we continue to expand these terms, we'll eventually end up with an equation
+    with an amount of variables equal to the total bit length of all the LFSRs - lets call it N.
+    If we then collect N linearily independant equations, we will have a linear equation system
+    that we can solve to reach the initial state of all LFSRs.
+    
+    So, we have our equations to represent each of the LFSR outputs, and we can stack
+    those horizontally to represent the output of each of MultiLFSR rounds.
+    We also have boolean functions for each Sbox output that represent linear equations over
+    the Sbox input space with respect to the inputs hamming weight.
         
-    This approach is akin to linear cryptanalysis as its described here, except we omit use
-    of the statistical components and use only 100% biases in certain bits.
-    [find paper]
-    
-    Essentially, we again take all 4 inputs for a given Sbox output, and check which
-    linear combination of bits leads to uniform results among all 4 inputs.
-    For instance, again looking at the example for Sbox output 14:
-        print("\n".join(bin(i)[2:].zfill(6) for i in rev_sbox_tb[14]))
-        101000
-        101001
-        110101
-        111000
-    Lets combine (add mod 2 i.e. xor) bits 1, 3 and 4 in each of these outputs:
-        101000 - 1 + 1 + 0 = 2 mod 2 = 0
-        101001 - 1 + 1 + 0 = 2 mod 2 = 0
-        110101 - 1 + 0 + 1 = 2 mod 2 = 0
-        111000 - 1 + 1 + 0 = 2 mod 2 = 0
-        ^ ^^     
-        101100 - (the mask)
-    This allows us to collect additional information from each Sbox output - 
-    if the Sbox outputs 14, no matter which of the four possible inputs 
-    was responsible for it - we know that the sum (mod 2) of bits 1, 3 and 4 was 0 - 100%
-    of the times.
-    And of course, each one of those bits (i.e. combined LFSR outputs) can be represented as 
-    a linear equation of the initial LFSR states.
-    The sum of these equations can be represented by adding the equations mod 2 - i.e. XORing 
-    them.
-    More concretely - if we apply the mask 101100 to all 4 inputs, and then sum the bits
-    of each of those inputs, the result will be 0 100% of the time.
-    
-    To map all such biases in the Sbox, we'll do the following:
-        for each Sbox output, map the four relevant 6 bit inputs:
-            for each possible 6 bit mask (2^6 values), 
-            apply the mask to all four input values, and sum their bits.
-            If the results are the same for all four input values, we have found
-            a valid equation which holds over the Sbox.
+    But how do we know the Sbox outputs? Let's take a look at the pcap:
+        [Screen shot of plaintext request, ciphertext response]
+    We have 20 HTTP requests, for each part of the file, and 20 encrypted responses.
+    Since the request structure is that of an HTTP request, it's safe to assume the reponse
+    will be a valid HTTP response - namely one that starts with something along the
+    lines of 'HTTP/1.0 200 OK', subject to potential changes in the version or status code.
 
+    If we take the first encrypted response bytes (after stripping the KappaMsg headers)
+    and XOR them with this string, we'll have a good amount of presumed keystream with which
+    to generate equations:
+    We split the guessed keystream into 4 bit nibbles, each representing an output value
+    from the Sbox.
+    For each of those nibbles, we refer to the boolean functions we discovered earlier
+    to construct an equation comprising the 5 LFSRs' state bits as variables, and 
+    keep going until we have enough (the same amoount of linearly independant equations and bits).
+    If we guessed some of the plaintext wrong, the equation system probably won't solve, and
+    we can try again, making slight modifications to the guessed plaintext.
     
-    
+    Its worth noting that the guessed keystream doesn't have to be contiguous - we can
+    guess just a few bytes (e.g. just 'HTTP') from each of the 20 responses.
 
-    
-
-    
-    
-    
-     
+    I'll refer you the the solution code to see it come together. While most of the code samples
+    above are in Sage for claritys sake, I actually opted to write the solution itself in 
+    Python3, using numpy and writing some of the more elusive pieces of code myself.
+    Recap and overview of code:
+    Preparation:
+        1. For all given LFSRs in the MultiLFSR system, generate the equations representing
+        each output bit from the MultiLFSR, prior to passing through the Sbox
+        2. For all Sbox outputs, search for boolean functions representing linear equations
+        that hold over said Sbox input->output mapping.
+    Attack:
+        1. Using HTTP headers as presumed plaintext, guess some of the keystream values.
+        2. For each nibble in the keystream, collect all the boolean functions found for that 
+        nibble value.
+        3. For each nibble value and its respective boolean functions, take 6 MultiLFSR 
+        equations (representing 6 MultiLFSR outputs) and XOR together the equations for which
+        the relevant bit in the boolean function was '1', and set the result to be the result
+        of said boolean function.
+        This will result in a N variable equation, with an additional result bit.
+        4. When N linearly independant equations are collected, stack them to create an
+        Nx(N+1) matrix representing a linear equation system.
+        5. Solve using Gaussian Elimination. The output should be an NxN identity matrix along 
+        with a solution column representing the initial state of all N bits in the MultiLFSR.
+        6. Using those seed values, decrypt the communication
+    The result:
+        [Example of decrypted payload]
+        [huge png file result]
+    The file transferred over the Kappa channel was a huge PNG containing the flag:
+        CTF{yesuisunjambon2} 
     
 
 https://www.springer.com/gp/book/9783642173417
 https://www.iasj.net/iasj?func=fulltext&aId=88499
+https://www.rocq.inria.fr/secret/Anne.Canteaut/poly.pdf
 
     
     
@@ -408,3 +477,4 @@ TODO -
     Links in writeup
     Set up references section
     Replace get_lfsr_equations with either MATLAB or sage code.
+    Colorize bit values in Sbox bias analysis part
